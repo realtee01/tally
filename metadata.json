@@ -1,0 +1,6 @@
+{
+  "name": "Huggo Tape Co.",
+  "description": "Hold it together — a playful, scroll-told landing page and shop for Huggo Tape Co.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
