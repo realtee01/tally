@@ -1,9 +1,29 @@
 import * as React from "react";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { Menu, ShoppingBag, Wallet, X } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { useWeb3 } from "../web3/Web3Context";
+import { NetworkSwitcher } from "./web3/NetworkSwitcher";
+import { AssetDashboard } from "./web3/AssetDashboard";
+import { NftGallery } from "./web3/NftGallery";
+import { ChainIcon } from "./web3/ChainIcon";
+
+const WalletConnectModal = React.lazy(() =>
+  import("./web3/WalletConnectModal").then((m) => ({
+    default: m.WalletConnectModal,
+  }))
+);
+const TransactionModal = React.lazy(() =>
+  import("./web3/TransactionModal").then((m) => ({
+    default: m.TransactionModal,
+  }))
+);
 
 if (typeof window !== "undefined") {
   gsap.registerPlugin(ScrollTrigger);
+  gsap.ticker.lagSmoothing(500, 33);
+  ScrollTrigger.config({ ignoreMobileResize: true, limitCallbacks: true });
 }
 
 export type TallySpoolKind = "frost" | "mint" | "gold" | "violet" | "foil";
@@ -18,15 +38,15 @@ export type TallyProduct = {
 export interface TallyBankTemplateProps {
   /** Height of the hero and of the sticky vault stage. Must be a definite length. */
   height?: string;
-  /** Wordmark printed on the coin emblem, currency spools, and footer. */
+  /** Wordmark printed on the coin emblem, spools, and footer. */
   brand?: string;
   /** The two headline lines that pop in. */
   headline?: [string, string];
-  /** Brand promise on the buttercream ledger card. */
+  /** Brand story on the buttercream ledger card. */
   story?: string;
-  /** Items on the budget sticky note. The third one is ticked. */
+  /** Items on the on-chain sticky note. The third one is ticked. */
   todo?: string[];
-  /** Phrases printed on the wavy currency ribbon, separated by the emblem. */
+  /** Phrases printed on the wavy ribbon, separated by the emblem. */
   marquee?: string[];
   /** Headline of the vault-lock section, one line per entry. */
   maskHeadline?: string[];
@@ -43,45 +63,57 @@ const FONT_HREF =
 
 const DEFAULT_PRODUCTS: TallyProduct[] = [
   {
-    name: "Clear Card",
-    line: "Everyday translucent debit card with 2-day early payday.",
-    price: "$0",
+    name: "Clear Key",
+    line: "NFC cold-storage hardware signer card with instant tap-to-sign.",
+    price: "$29",
     kind: "frost",
   },
   {
-    name: "Mint Metal",
-    line: "Anodized brushed-mint metal card with 3% instant cash back.",
-    price: "$12",
+    name: "Mint Pass",
+    line: "Genesis protocol pass unlocking 0% swap fees across 5 chains.",
+    price: "$45",
     kind: "mint",
   },
   {
     name: "Gold Vault",
-    line: "Auto-sorting savings jars earning 4.8% APY with bill lock.",
-    price: "$5",
+    line: "Multi-sig treasury module with automated staking & yield routing.",
+    price: "$18",
     kind: "gold",
   },
   {
-    name: "Travel Pass",
-    line: "Zero foreign fees and real-time local currency switching.",
-    price: "$8",
+    name: "Bridge Pack",
+    line: "Pre-funded gas relayer credits for Ethereum, Base, Arbitrum & Polygon.",
+    price: "$12",
     kind: "violet",
   },
 ];
 
 const KIND_LABEL: Record<TallySpoolKind, string> = {
-  frost: "Debit",
-  mint: "Metal",
+  frost: "Signer",
+  mint: "Pass",
   gold: "Vault",
-  violet: "Travel",
+  violet: "Bridge",
   foil: "Reserve",
 };
 
 const useIso =
   typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
 const REDUCE = "(prefers-reduced-motion: reduce)";
-const FACETS = Array.from({ length: 32 }, (_, i) => i);
-const REPEAT = 6;
+const IS_COMPACT_GPU =
+  typeof window !== "undefined" &&
+  window.matchMedia("(max-width: 768px), (pointer: coarse)").matches;
+const FACET_COUNT = IS_COMPACT_GPU ? 16 : 24;
+const FACETS = Array.from({ length: FACET_COUNT }, (_, i) => i);
+const REPEAT = IS_COMPACT_GPU ? 4 : 6;
 const v = (o: Record<string, string | number>) => o as React.CSSProperties;
+
+const NAV_SECTIONS = [
+  { id: "story", label: "Story" },
+  { id: "vaults", label: "Vaults" },
+  { id: "portfolio", label: "Assets" },
+  { id: "nfts", label: "NFTs" },
+  { id: "cards", label: "Stack" },
+] as const;
 
 /** Notched wax-coin emblem: alternating sharp peaks around 60,60. */
 function coinEdge(rIn: number, rOut: number, n: number) {
@@ -112,7 +144,7 @@ function parsePrice(price: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/** Notched coin-seal emblem for Tally Bank Co. */
+/** Notched coin-seal emblem for Tally Web3 Co. */
 export function TallyBadge({
   size,
   brand = "TALLY",
@@ -168,7 +200,7 @@ export function TallyBadge({
         fontSize="8.5"
         letterSpacing="2.2"
       >
-        BANK CO.
+        WEB3 CO.
       </text>
       <rect x="47" y="34" width="26" height="4" rx="2" fill="#ffd447" />
       <rect x="53" y="40" width="14" height="3" rx="1.5" fill="#ff5a43" />
@@ -185,7 +217,7 @@ export function TallyBadge({
   );
 }
 
-/** The flat end of a currency/receipt spool: layered paper edges, dark core, printed badge. */
+/** The flat end of a protocol spool: layered edges, dark core, printed badge. */
 function SpoolFace({ kind, brand }: { kind: TallySpoolKind; brand: string }) {
   return (
     <div className={"tb-face tb-k-" + kind}>
@@ -199,10 +231,20 @@ function SpoolFace({ kind, brand }: { kind: TallySpoolKind; brand: string }) {
   );
 }
 
-/** A true 3D spool: 32 band facets around the x axis plus two end caps. */
-function Spool3D({ kind, brand }: { kind: TallySpoolKind; brand: string }) {
+/** A true 3D spool: adaptive band facets around the x axis plus two end caps. */
+const Spool3D = React.memo(function Spool3D({
+  kind,
+  brand,
+}: {
+  kind: TallySpoolKind;
+  brand: string;
+}) {
   return (
-    <div className={"tb-roll tb-k-" + kind} aria-hidden="true">
+    <div
+      className={"tb-roll tb-k-" + kind}
+      style={v({ "--facets": FACET_COUNT })}
+      aria-hidden="true"
+    >
       <div className="tb-roll-shadow" />
       <div className="tb-roll-body">
         {FACETS.map((i) => (
@@ -217,7 +259,7 @@ function Spool3D({ kind, brand }: { kind: TallySpoolKind; brand: string }) {
       </div>
     </div>
   );
-}
+});
 
 /** A torn paper/security strip. `peel` makes it a drag/press target. */
 function BandStrip({
@@ -307,7 +349,7 @@ function CoinBurst({
   );
 }
 
-/** Custom geometric banknote & coin guilloché pattern sheet. */
+/** Custom geometric token & ledger guilloché pattern sheet. */
 function BanknotePrint({ uid }: { uid: string }) {
   return (
     <svg
@@ -379,7 +421,7 @@ function BanknotePrint({ uid }: { uid: string }) {
   );
 }
 
-/** Metallic wax-seal ribbon knot for the Payday Card Packet. */
+/** Metallic wax-seal ribbon knot for the Genesis Airdrop Packet. */
 function PaydayCrest({ uid }: { uid: string }) {
   return (
     <svg className="tb-packet-crest" viewBox="0 0 220 160" aria-hidden="true">
@@ -425,22 +467,44 @@ function PaydayCrest({ uid }: { uid: string }) {
 export default function TallyBankTemplate({
   height = "100svh",
   brand = "TALLY",
-  headline = ["KEEP IT", "SORTED"],
-  story = "Split dinners, rent due at midnight, the surprise flat tire, the Lisbon fund that never sticks. We sort every dollar, so you don't have to.",
+  headline = ["KEEP IT", "ON-CHAIN"],
+  story = "Gas spikes at midnight, five chains to bridge, dusty token approvals, the yield vault that never sticks. We sort every wallet, so you don't have to.",
   todo = [
-    "split Friday pizza",
-    "stash $400 for Lisbon",
-    "pay rent on time",
-    "cancel mystery gym",
-    "buy mom flowers",
+    "bridge ETH to Base",
+    "stake 2 ETH in vault",
+    "claim genesis drop",
+    "revoke old approvals",
+    "collect vault cube",
   ],
-  marquee = ["ZERO HIDDEN FEES", "YOUR MONEY, SORTED"],
-  maskHeadline = ["ZERO", "FEES", "EVER"],
+  marquee = ["ZERO HIDDEN GAS", "YOUR CRYPTO, SORTED"],
+  maskHeadline = ["PURE", "SELF", "CUSTODY"],
   products = DEFAULT_PRODUCTS,
   preloader = true,
   fontHref = FONT_HREF,
   className,
 }: TallyBankTemplateProps) {
+  const {
+    mode,
+    isConnected,
+    abbreviatedAddress,
+    activeChain,
+    walletModalOpen,
+    setWalletModalOpen,
+    txModalRequest,
+    openTxModal,
+  } = useWeb3();
+
+  const [mountWalletModal, setMountWalletModal] = React.useState(false);
+  const [mountTxModal, setMountTxModal] = React.useState(false);
+
+  React.useEffect(() => {
+    if (walletModalOpen) setMountWalletModal(true);
+  }, [walletModalOpen]);
+
+  React.useEffect(() => {
+    if (txModalRequest) setMountTxModal(true);
+  }, [txModalRequest]);
+
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const ctxRef = React.useRef<gsap.Context | null>(null);
   const addedTimerRef = React.useRef<number | null>(null);
@@ -448,11 +512,21 @@ export default function TallyBankTemplate({
 
   const [cart, setCart] = React.useState<Record<string, number>>({});
   const [bagOpen, setBagOpen] = React.useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
   const [orderPlaced, setOrderPlaced] = React.useState(false);
   const [added, setAdded] = React.useState(-1);
   const [peeledCount, setPeeledCount] = React.useState(0);
   const [email, setEmail] = React.useState("");
   const [joined, setJoined] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileNavOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileNavOpen]);
 
   const bagCount = React.useMemo(
     () => Object.values(cart).reduce((sum, qty) => sum + qty, 0),
@@ -535,8 +609,21 @@ export default function TallyBankTemplate({
     });
   };
 
-  const handleCheckout = () => {
-    setOrderPlaced(true);
+  const handleOnChainCheckout = () => {
+    const ethApprox = Math.max(0.004, bagSubtotal / 3280).toFixed(4);
+    const summary = bagItems
+      .map((i) => `${i.qty}× ${i.product.name}`)
+      .join(", ");
+    setBagOpen(false);
+    openTxModal({
+      kind: "mint",
+      title: `Mint Tally Kit ($${bagSubtotal})`,
+      assetSymbol: activeChain.nativeSymbol,
+      defaultAmount: ethApprox,
+      defaultRecipient: "0x98A2cE41b7F0392a14C8d92761e4B30f92c81A4E",
+      editable: false,
+      subtitle: `Order items: ${summary}. Settlement routed via Tally Protocol treasury.`,
+    });
     setCart({});
   };
 
@@ -588,6 +675,11 @@ export default function TallyBankTemplate({
     };
   }, []);
 
+  React.useEffect(() => {
+    const id = window.setTimeout(() => ScrollTrigger.refresh(), 120);
+    return () => window.clearTimeout(id);
+  }, [isConnected, mode]);
+
   // ---- motion choreography ---------------------------------------------------------------------
   useIso(() => {
     const root = rootRef.current;
@@ -599,7 +691,6 @@ export default function TallyBankTemplate({
     let alive = true;
 
     const ctx = gsap.context(() => {
-      // ---- the receipt spool and the strip it leaves -------------------------------------------
       const run = q(".tb-run");
       const hero = q(".tb-hero");
       const roll = q(".tb-run .tb-roll");
@@ -634,7 +725,6 @@ export default function TallyBankTemplate({
         strip.style.setProperty("--gy", (dist * 0.55).toFixed(1) + "px");
       };
 
-      // ---- the marigold ribbon: a sine wave, a marquee printed along it, a spool that lays it --
       const banner = q(".tb-banner");
       const bsvg = q(".tb-bn-svg");
       const glyphLayer = q(".tb-bn-glyphs");
@@ -761,11 +851,11 @@ export default function TallyBankTemplate({
           const ang = Math.atan(A * k * Math.cos(k * x + bn.ph));
           el.style.visibility = x > W + 60 ? "hidden" : "visible";
           el.style.transform =
-            "translate(" +
+            "translate3d(" +
             (x - bn.w[i] / 2).toFixed(1) +
             "px," +
             (y - bn.h[i] / 2).toFixed(1) +
-            "px) rotate(" +
+            "px,0) rotate(" +
             ang.toFixed(4) +
             "rad)";
         }
@@ -775,17 +865,16 @@ export default function TallyBankTemplate({
           bRoll.style.opacity =
             bn.reveal > 0.001 && bn.reveal < 0.999 ? "1" : "0";
           bRoll.style.transform =
-            "translate(" +
+            "translate3d(" +
             (xr - d / 2).toFixed(1) +
             "px," +
             (y - d / 2).toFixed(1) +
-            "px) rotate(" +
+            "px,0) rotate(" +
             ((xr / (d / 2)) * 57.3).toFixed(1) +
             "deg)";
         }
       };
 
-      // ---- the vault stage: lock bands, coat violet, unlock clean ------------------------------
       const mask = q(".tb-mask");
       const mkBodies = qa(".tb-mk-body");
       const mkLeads = qa(".tb-mk-lead");
@@ -860,7 +949,6 @@ export default function TallyBankTemplate({
         return tl;
       };
 
-      // ---- play: peel the security bands off; drag across hero to stamp a receipt strip --------
       const calm = () => window.matchMedia(REDUCE).matches;
       for (const tp of qa(".tb-peel")) {
         const bit = tp.querySelector(".tb-tp-in");
@@ -982,7 +1070,7 @@ export default function TallyBankTemplate({
           [ox, oy] = at(e);
           cur = document.createElement("i");
           cur.className = "tb-doodle";
-          cur.textContent = (brand + " PAID \u2726 ").repeat(24);
+          cur.textContent = (brand + " SIGNED \u2726 ").repeat(24);
           cur.style.left = ox + "px";
           cur.style.top = oy + "px";
           doodles.appendChild(cur);
@@ -1039,7 +1127,6 @@ export default function TallyBankTemplate({
 
       const mm = gsap.matchMedia();
 
-      // ---- reduced motion: calm fades over a finished page -------------------------------------
       mm.add(REDUCE, () => {
         const still = () => {
           refreshAll();
@@ -1075,7 +1162,6 @@ export default function TallyBankTemplate({
         return () => ro.disconnect();
       });
 
-      // ---- full choreography -------------------------------------------------------------------
       mm.add("(prefers-reduced-motion: no-preference)", () => {
         refreshAll();
         drawTape();
@@ -1098,27 +1184,27 @@ export default function TallyBankTemplate({
           intro
             .to(
               q(".tb-pre-label"),
-              { opacity: 0, y: -30, duration: 0.35, ease: "power2.in" },
-              0.1
+              { opacity: 0, y: -24, duration: 0.22, ease: "power2.in" },
+              0.05
             )
             .fromTo(
               bands,
               { yPercent: 64 },
               {
                 yPercent: -36,
-                duration: 1.15,
+                duration: 0.56,
                 ease: "power3.inOut",
-                stagger: 0.13,
+                stagger: 0.06,
               },
               0
             )
-            .set(pre, { autoAlpha: 0 }, 0.13 * (bands.length - 1) + 1.1);
-          t0 = 0.13 * (bands.length - 1) + 0.75;
+            .set(pre, { autoAlpha: 0 }, 0.06 * (bands.length - 1) + 0.54);
+          t0 = 0.06 * (bands.length - 1) + 0.34;
           const n = { v: 0 };
           const num = q(".tb-pre-num");
           gsap.to(n, {
             v: 100,
-            duration: 0.8,
+            duration: 0.42,
             ease: "power2.out",
             onUpdate: () => {
               if (num) num.textContent = Math.round(n.v) + "%";
@@ -1127,65 +1213,70 @@ export default function TallyBankTemplate({
         }
         intro.to(
           tape,
-          { dy: 0, duration: 1.05, ease: "bounce.out", onUpdate: () => drawTape() },
+          { dy: 0, duration: 0.85, ease: "bounce.out", onUpdate: () => drawTape() },
           t0
         );
         intro
           .to(
             qa(".tb-kw"),
-            { opacity: 1, y: 0, duration: 0.5, ease: "back.out(2)", stagger: 0.12 },
-            t0 + 0.2
+            { opacity: 1, y: 0, duration: 0.42, ease: "back.out(2)", stagger: 0.09 },
+            t0 + 0.14
           )
           .to(
             q(".tb-kicker .tb-badge"),
-            { scale: 1, rotation: -8, duration: 0.8, ease: "back.out(2.2)" },
-            t0 + 0.25
+            { scale: 1, rotation: -8, duration: 0.65, ease: "back.out(2.2)" },
+            t0 + 0.18
           );
         const order = gsap.utils.shuffle(letters.slice());
         order.forEach((el, i) => {
-          const t = t0 + 0.35 + i * 0.055;
+          const t = t0 + 0.24 + i * 0.038;
           intro
             .fromTo(
               el,
-              { opacity: 0, scaleX: 1.55, scaleY: 0.12, y: 50 },
+              { opacity: 0, scaleX: 1.5, scaleY: 0.14, y: 42 },
               {
                 opacity: 1,
-                scaleX: 0.78,
-                scaleY: 1.32,
-                y: -46,
-                duration: 0.2,
+                scaleX: 0.8,
+                scaleY: 1.28,
+                y: -36,
+                duration: 0.16,
                 ease: "power2.out",
               },
               t
             )
             .to(
               el,
-              { scaleX: 1.22, scaleY: 0.8, y: 0, duration: 0.14, ease: "power2.in" },
-              t + 0.2
+              { scaleX: 1.18, scaleY: 0.84, y: 0, duration: 0.12, ease: "power2.in" },
+              t + 0.16
             )
             .to(
               el,
-              { scaleX: 1, scaleY: 1, duration: 0.7, ease: "elastic.out(1,.32)" },
-              t + 0.34
+              { scaleX: 1, scaleY: 1, duration: 0.55, ease: "elastic.out(1,.32)" },
+              t + 0.28
             );
         });
         intro.to(
           qa(".tb-hero-note, .tb-cue"),
-          { opacity: 1, duration: 0.6, stagger: 0.1 },
-          t0 + 1.1
+          { opacity: 1, duration: 0.45, stagger: 0.08 },
+          t0 + 0.72
         );
 
         let ready = false;
         const fonts = document.fonts ? document.fonts.ready : Promise.resolve();
         Promise.race([
           fonts,
-          new Promise((r) => window.setTimeout(r, 1600)),
+          new Promise((r) => window.setTimeout(r, 120)),
         ]).then(() => {
           if (!alive) return;
           ready = true;
           refreshAll();
           ScrollTrigger.refresh();
           intro.play();
+        });
+        fonts.then(() => {
+          if (!alive) return;
+          refreshAll();
+          ScrollTrigger.refresh();
         });
 
         const h1 = q(".tb-h1");
@@ -1417,9 +1508,22 @@ export default function TallyBankTemplate({
             0.55
           );
 
-        const ro = new ResizeObserver(() => ScrollTrigger.refresh());
+        let lastW = root.clientWidth;
+        let roTimer: number | null = null;
+        const ro = new ResizeObserver(() => {
+          const nextW = root.clientWidth;
+          if (IS_COMPACT_GPU && Math.abs(nextW - lastW) < 2) return;
+          lastW = nextW;
+          if (roTimer) window.clearTimeout(roTimer);
+          roTimer = window.setTimeout(() => {
+            if (alive) ScrollTrigger.refresh();
+          }, 180);
+        });
         ro.observe(root);
-        return () => ro.disconnect();
+        return () => {
+          if (roTimer) window.clearTimeout(roTimer);
+          ro.disconnect();
+        };
       });
     }, root);
 
@@ -1443,7 +1547,7 @@ export default function TallyBankTemplate({
       {preloader && (
         <div className="tb-pre" aria-hidden="true">
           <div className="tb-pre-label">
-            <span className="tb-pre-word">Counting</span>
+            <span className="tb-pre-word">Syncing</span>
             <span className="tb-pre-num">0%</span>
           </div>
           {["#ffd447", "#6d5dfc", "#1842b8", "#0e2447", "#5ef2b6"].map((c) => (
@@ -1454,42 +1558,85 @@ export default function TallyBankTemplate({
 
       <header className="tb-nav">
         <div className="tb-nav-in">
-          <button
-            type="button"
-            className="tb-nav-brand"
-            onClick={go("top")}
-            aria-label={brand + " Bank Co., back to top"}
-          >
-            <TallyBadge brand={brand} />
-          </button>
+          <div className="tb-nav-left">
+            <button
+              type="button"
+              className="tb-mob-menu-btn"
+              onClick={() => setMobileNavOpen((prev) => !prev)}
+              aria-expanded={mobileNavOpen}
+              aria-controls={uid + "mob-sidebar"}
+              aria-label={mobileNavOpen ? "Close navigation menu" : "Open navigation menu"}
+            >
+              {mobileNavOpen ? (
+                <X size={18} strokeWidth={2.6} aria-hidden="true" />
+              ) : (
+                <Menu size={18} strokeWidth={2.6} aria-hidden="true" />
+              )}
+            </button>
+
+            <button
+              type="button"
+              className="tb-nav-brand"
+              onClick={go("top")}
+              aria-label={brand + " Web3 Co., back to top"}
+            >
+              <TallyBadge brand={brand} />
+            </button>
+          </div>
+
           <nav className="tb-nav-links" aria-label="Sections">
-            <button type="button" onClick={go("story")}>
-              Story
-            </button>
-            <button type="button" onClick={go("vaults")}>
-              Vaults
-            </button>
-            <button type="button" onClick={go("cards")}>
-              Cards
-            </button>
+            {NAV_SECTIONS.map((sec) => (
+              <button key={sec.id} type="button" onClick={go(sec.id)}>
+                {sec.label}
+              </button>
+            ))}
           </nav>
-          <button
-            type="button"
-            className="tb-bag"
-            onClick={() => {
-              setOrderPlaced(false);
-              setBagOpen(true);
-            }}
-            aria-expanded={bagOpen}
-            aria-controls={uid + "wallet-drawer"}
-          >
-            Wallet <span className="tb-bag-n">{bagCount}</span>
-            <span className="tb-sr" aria-live="polite">
-              {bagCount
-                ? bagCount + (bagCount === 1 ? " item" : " items") + " in your wallet"
-                : ""}
-            </span>
-          </button>
+
+          <div className="w3-nav-actions">
+            <NetworkSwitcher compact />
+
+            <button
+              type="button"
+              className={
+                "w3-connect-btn" +
+                (isConnected ? " w3-connect-btn-active" : "")
+              }
+              onClick={() => setWalletModalOpen(true)}
+            >
+              {isConnected ? (
+                <>
+                  <ChainIcon chainId={activeChain.id} size={16} />
+                  <span className="w3-mono">{abbreviatedAddress}</span>
+                  {mode === "demo" && <span className="w3-mini-demo">Demo</span>}
+                </>
+              ) : (
+                <>
+                  <Wallet size={15} strokeWidth={2.5} aria-hidden="true" />
+                  <span>Connect Wallet</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              className="tb-bag tb-bag-compact"
+              onClick={() => {
+                setOrderPlaced(false);
+                setBagOpen(true);
+              }}
+              aria-expanded={bagOpen}
+              aria-controls={uid + "kit-drawer"}
+              aria-label={`Open Tally kit bag, ${bagCount} items`}
+            >
+              <ShoppingBag size={15} strokeWidth={2.5} aria-hidden="true" />
+              <span className="tb-bag-n">{bagCount}</span>
+              <span className="tb-sr" aria-live="polite">
+                {bagCount
+                  ? bagCount + (bagCount === 1 ? " item" : " items") + " in your kit"
+                  : ""}
+              </span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -1507,7 +1654,7 @@ export default function TallyBankTemplate({
           <div className="tb-doodles" aria-hidden="true" />
           <div className="tb-hero-copy">
             <p className="tb-kicker">
-              <span className="tb-kw">Banking</span>
+              <span className="tb-kw">Web3</span>
               <TallyBadge brand={brand} />
               <span className="tb-kw">built to</span>
             </p>
@@ -1528,19 +1675,19 @@ export default function TallyBankTemplate({
             </h1>
           </div>
           <p className="tb-hero-note">
-            <b>4.8%</b> APY Vaults
+            <b>6.4%</b> Staking APY
           </p>
           <p className="tb-cue">
-            <span className="tb-cue-drag">Drag to stamp &middot; </span>Scroll, it
+            <span className="tb-cue-drag">Drag to sign &middot; </span>Scroll, it
             rolls <span aria-hidden="true">&darr;</span>
           </p>
         </section>
 
-        <section className="tb-collage" data-sec="story" aria-label="Our promise">
+        <section className="tb-collage" data-sec="story" aria-label="Our protocol">
           <div className="tb-board">
             <div className="tb-item tb-i-head" style={v({ "--r": "-3deg" })}>
               <div className="tb-in" data-drop>
-                <p className="tb-label">02 &mdash; The paper trail</p>
+                <p className="tb-label">02 &mdash; The block trail</p>
                 <div className="tb-hint-row">
                   <p className="tb-hint">psst, peel the seals off &rarr;</p>
                   {peeledCount > 0 && (
@@ -1556,7 +1703,7 @@ export default function TallyBankTemplate({
                 <h2 className="tb-collage-h">
                   For real
                   <br />
-                  life cash
+                  Web3 life
                 </h2>
               </div>
             </div>
@@ -1564,10 +1711,10 @@ export default function TallyBankTemplate({
             <div className="tb-item tb-i-card" style={v({ "--r": "2.5deg" })}>
               <div className="tb-in" data-drop>
                 <article className="tb-card tb-paper">
-                  <p className="tb-card-k">Our promise &middot; est. 2024</p>
+                  <p className="tb-card-k">Our protocol &middot; est. 2024</p>
                   <p className="tb-card-t">{story}</p>
                   <p className="tb-card-sign">
-                    &mdash; the {brand.toLowerCase()} crew
+                    &mdash; the {brand.toLowerCase()} dao
                   </p>
                 </article>
                 <BandStrip kind="gold" x="88%" y="2%" w="30%" r={38} peel />
@@ -1578,7 +1725,7 @@ export default function TallyBankTemplate({
             <div className="tb-item tb-i-note" style={v({ "--r": "-7deg" })}>
               <div className="tb-in" data-drop>
                 <div className="tb-note">
-                  <p className="tb-note-h">money list</p>
+                  <p className="tb-note-h">chain list</p>
                   <ul>
                     {todo.map((t, i) => (
                       <li key={i} className={i === 2 ? "tb-done" : undefined}>
@@ -1608,9 +1755,9 @@ export default function TallyBankTemplate({
                   <div className="tb-packet-rib tb-packet-rib-h" />
                   <PaydayCrest uid={uid} />
                   <div className="tb-packet-tag">
-                    payday!
+                    airdrop!
                     <br />
-                    <small>zero fees</small>
+                    <small>zero gas</small>
                   </div>
                 </div>
                 <BandStrip kind="frost" x="8%" y="64%" w="30%" r={70} peel />
@@ -1620,10 +1767,10 @@ export default function TallyBankTemplate({
             <div className="tb-item tb-i-ticket" style={v({ "--r": "9deg" })}>
               <div className="tb-in" data-drop>
                 <div className="tb-ticket tb-paper">
-                  <span className="tb-ticket-k">Early payday</span>
-                  <span className="tb-ticket-big">Wed 9:00</span>
+                  <span className="tb-ticket-k">Genesis drop</span>
+                  <span className="tb-ticket-big">Fri 12:00</span>
                   <span className="tb-ticket-s">
-                    2 days early &middot; $0 fees &middot; instant
+                    5 chains &middot; 0% fee &middot; instant
                   </span>
                 </div>
                 <BandStrip kind="mint" x="50%" y="0%" w="64%" r={-3} peel />
@@ -1634,22 +1781,22 @@ export default function TallyBankTemplate({
               <div className="tb-in" data-drop>
                 <div className="tb-seal">
                   <span>Earns</span>
-                  <b>4.8%</b>
+                  <b>6.4%</b>
                   <span>APY*</span>
                 </div>
               </div>
             </div>
           </div>
           <p className="tb-fine">
-            *Variable APY on Tally Vaults, compounded daily with no minimum balance
-            or hidden maintenance charges.
+            *Indicative variable staking APY on audited Tally Smart Vaults. Self-custody
+            keys remain exclusively in your connected wallet.
           </p>
         </section>
 
         <div className="tb-tape" aria-hidden="true">
           <div className="tb-strip">
             <div className="tb-strip-print">
-              {(brand + " RECEIPT \u2726 ZERO FEES \u2726 ").repeat(24)}
+              {(brand + " PROTOCOL \u2726 SELF CUSTODY \u2726 ").repeat(24)}
             </div>
           </div>
           <Spool3D kind="frost" brand={brand} />
@@ -1717,7 +1864,7 @@ export default function TallyBankTemplate({
       <section
         className="tb-mask"
         data-sec="vaults"
-        aria-label="Bill-lock vault trick"
+        aria-label="Smart vault custody trick"
       >
         <div className="tb-mask-stage">
           <svg
@@ -1848,10 +1995,13 @@ export default function TallyBankTemplate({
                   "translate(" + s.cx + " " + s.cy + ") rotate(" + s.a + ")"
                 }
               >
-                <g
-                  className="tb-mk-body"
-                  filter="drop-shadow(0 3px 2px rgba(14,36,71,.28))"
-                >
+                <g className="tb-mk-body">
+                  <rect
+                    y={-MK_W / 2 + 5}
+                    height={MK_W}
+                    width="0"
+                    fill="rgba(14,36,71,.22)"
+                  />
                   <rect
                     y={-MK_W / 2}
                     height={MK_W}
@@ -1932,21 +2082,21 @@ export default function TallyBankTemplate({
           </div>
 
           <div className="tb-mask-copy">
-            <p className="tb-label">03 &mdash; Vault trick: lock, save, spend</p>
+            <p className="tb-label">03 &mdash; Vault trick: lock, stake, bridge</p>
             <p>
-              {brand.charAt(0) + brand.slice(1).toLowerCase()} Vaults cordon off
-              rent and bills before you spend, then unlock cleanly on due day. No
-              overdrafts, no fine print, no surprise charges.
+              {brand.charAt(0) + brand.slice(1).toLowerCase()} Smart Vaults isolate
+              staking yield and gas budgets before you sign, then unlock cleanly on
+              demand. No hidden approvals, no custodial risk.
             </p>
-            <button type="button" className="tb-btn" onClick={go("cards")}>
-              Explore cards
+            <button type="button" className="tb-btn" onClick={go("portfolio")}>
+              Open portfolio
             </button>
           </div>
 
           <div className="tb-mask-stamp" aria-hidden="true">
-            Zero
+            100%
             <br />
-            fees
+            on-chain
           </div>
 
           <CoinBurst
@@ -1987,24 +2137,28 @@ export default function TallyBankTemplate({
         </div>
       </section>
 
+      <AssetDashboard />
+
+      <NftGallery />
+
       <section
         className="tb-shop tb-grainy"
         data-sec="cards"
-        aria-label="Cards and plans"
+        aria-label="Hardware and protocol passes"
       >
         <div className="tb-join tb-join-gold" aria-hidden="true">
           <i className="tb-join-in" />
         </div>
         <div className="tb-shop-head">
-          <p className="tb-label">04 &mdash; The lineup</p>
+          <p className="tb-label">06 &mdash; Hardware &amp; passes</p>
           <h2 className="tb-shop-h">
             Pick your
             <br />
             stack
           </h2>
           <p className="tb-shop-sub">
-            Four tools, zero banking bloat. Mix a free everyday card with vaults,
-            metal perks, and borderless travel.
+            Four Web3 essentials, zero bloat. Pair a cold-storage signer card with
+            multi-chain passes, vault modules, and gasless bridge credits.
           </p>
         </div>
         <div className="tb-shop-grid">
@@ -2024,7 +2178,7 @@ export default function TallyBankTemplate({
                   className="tb-btn tb-btn-sm"
                   onClick={add(i)}
                 >
-                  {added === i ? "Added!" : "Add to wallet"}
+                  {added === i ? "Added!" : "Add to kit"}
                 </button>
               </div>
             </article>
@@ -2038,8 +2192,8 @@ export default function TallyBankTemplate({
         </div>
         <div className="tb-foot-top">
           <div>
-            <p className="tb-label">05 &mdash; Stay in the loop</p>
-            <p className="tb-foot-h">Rate boosts, fresh perks, zero jargon.</p>
+            <p className="tb-label">07 &mdash; Stay synced</p>
+            <p className="tb-foot-h">Protocol drops, yield boosts, zero spam.</p>
           </div>
           <form
             className="tb-form"
@@ -2065,7 +2219,7 @@ export default function TallyBankTemplate({
               Count me in
             </button>
             <p className="tb-form-msg" aria-live="polite">
-              {joined ? "You're on the Tally list." : ""}
+              {joined ? "You're synced with Tally Protocol." : ""}
             </p>
           </form>
         </div>
@@ -2085,9 +2239,9 @@ export default function TallyBankTemplate({
         </div>
         <div className="tb-foot-bar">
           <span>
-            &copy; 2026 {brand.charAt(0) + brand.slice(1).toLowerCase()} Bank Co.
+            &copy; 2026 {brand.charAt(0) + brand.slice(1).toLowerCase()} Web3 Co.
           </span>
-          <span>Built to keep your money sorted.</span>
+          <span>Built to keep your crypto sorted.</span>
         </div>
       </footer>
 
@@ -2099,19 +2253,19 @@ export default function TallyBankTemplate({
           }}
         >
           <aside
-            id={uid + "wallet-drawer"}
+            id={uid + "kit-drawer"}
             className="tb-drawer"
             role="dialog"
             aria-modal="true"
-            aria-label="Your Tally wallet"
+            aria-label="Your Tally Web3 kit"
           >
             <div className="tb-drawer-head">
-              <h2 className="tb-drawer-title">Your Wallet ({bagCount})</h2>
+              <h2 className="tb-drawer-title">Your Kit ({bagCount})</h2>
               <button
                 type="button"
                 className="tb-drawer-close"
                 onClick={() => setBagOpen(false)}
-                aria-label="Close wallet"
+                aria-label="Close kit drawer"
               >
                 &times;
               </button>
@@ -2122,8 +2276,8 @@ export default function TallyBankTemplate({
                 <div className="tb-drawer-done">
                   <h3>All sorted!</h3>
                   <p>
-                    Your {brand.charAt(0) + brand.slice(1).toLowerCase()} kit is
-                    locked in and ready to roll.
+                    Your {brand.charAt(0) + brand.slice(1).toLowerCase()} hardware
+                    &amp; pass kit is reserved.
                   </p>
                   <button
                     type="button"
@@ -2138,8 +2292,10 @@ export default function TallyBankTemplate({
                 </div>
               ) : bagItems.length === 0 ? (
                 <div className="tb-drawer-empty">
-                  <p className="tb-drawer-empty-note">Your wallet is empty!</p>
-                  <p>Pick a card or vault bundle from the lineup to build your kit.</p>
+                  <p className="tb-drawer-empty-note">Your kit is empty!</p>
+                  <p>
+                    Pick a hardware signer or protocol pass from the stack below.
+                  </p>
                   <button
                     type="button"
                     className="tb-btn"
@@ -2194,15 +2350,75 @@ export default function TallyBankTemplate({
                 <button
                   type="button"
                   className="tb-btn"
-                  onClick={handleCheckout}
+                  onClick={handleOnChainCheckout}
                 >
-                  Confirm kit &middot; ${bagSubtotal}
+                  Checkout On-Chain &middot; ${bagSubtotal}
                 </button>
               </div>
             )}
           </aside>
         </div>
       )}
+
+      <AnimatePresence>
+        {mobileNavOpen && (
+          <motion.div
+            className="tb-mob-side-bg"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.16 }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setMobileNavOpen(false);
+            }}
+          >
+            <motion.aside
+              id={uid + "mob-sidebar"}
+              className="tb-mob-side"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Mobile sections navigation"
+              initial={{ x: -200, opacity: 0.9 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -200, opacity: 0.9 }}
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <div className="tb-mob-side-head">
+                <span>Menu</span>
+                <button
+                  type="button"
+                  className="tb-mob-side-close"
+                  onClick={() => setMobileNavOpen(false)}
+                  aria-label="Close navigation sidebar"
+                >
+                  <X size={15} strokeWidth={2.6} />
+                </button>
+              </div>
+              <nav className="tb-mob-side-nav" aria-label="Mobile sections">
+                {NAV_SECTIONS.map((sec, idx) => (
+                  <button
+                    key={sec.id}
+                    type="button"
+                    className="tb-mob-side-link"
+                    onClick={() => {
+                      setMobileNavOpen(false);
+                      go(sec.id)();
+                    }}
+                  >
+                    <span className="tb-mob-side-idx">0{idx + 1}</span>
+                    <span>{sec.label}</span>
+                  </button>
+                ))}
+              </nav>
+            </motion.aside>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <React.Suspense fallback={null}>
+        {mountWalletModal && <WalletConnectModal />}
+        {mountTxModal && <TransactionModal />}
+      </React.Suspense>
     </div>
   );
 }

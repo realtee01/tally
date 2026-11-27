@@ -33,6 +33,33 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      target: 'es2020',
+      cssCodeSplit: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return;
+            if (id.includes('react-dom') || id.includes('/react/')) {
+              return 'vendor-react';
+            }
+            if (id.includes('gsap') || id.includes('motion')) {
+              return 'vendor-motion';
+            }
+            if (
+              id.includes('wagmi') ||
+              id.includes('viem') ||
+              id.includes('@tanstack')
+            ) {
+              return 'vendor-web3';
+            }
+            if (id.includes('lucide-react')) {
+              return 'vendor-icons';
+            }
+          },
+        },
+      },
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
